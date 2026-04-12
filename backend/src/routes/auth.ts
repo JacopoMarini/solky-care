@@ -65,16 +65,21 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    // Primo utente: esegui login per ottenere il token
-    const { data: session, error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (signInError || !session.session)
+    // Primo utente: ottieni token via REST API (non contamina il client service_role)
+    const signInRes = await fetch(
+      `${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: process.env.SUPABASE_SERVICE_KEY! },
+        body: JSON.stringify({ email, password }),
+      }
+    );
+    const signInJson = await signInRes.json() as { access_token?: string };
+    if (!signInJson.access_token)
       return reply.status(500).send({ error: 'Errore login dopo registrazione' });
 
     return {
-      token: session.session.access_token,
+      token: signInJson.access_token,
       user: { id: authData.user.id, name, email, role, status },
     };
   });
@@ -87,15 +92,27 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
     if (!email || !password)
       return reply.status(400).send({ error: 'Email e password obbligatorie' });
 
-    const { data: session, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error || !session.session)
+    // Usa la REST API direttamente per non contaminare il client service_role con la sessione utente
+    const authRes = await fetch(
+      `${process.env.SUPABASE_URL}/auth/v1/token?grant_type=password`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: process.env.SUPABASE_SERVICE_KEY!,
+        },
+        body: JSON.stringify({ email, password }),
+      }
+    );
+    const authJson = await authRes.json() as { access_token?: string; user?: { id: string }; error_description?: string };
+    if (!authJson.access_token || !authJson.user)
       return reply.status(401).send({ error: 'Credenziali non valide' });
 
-    // Recupera profilo
+    // Recupera profilo (service_role, nessuna sessione utente in memoria)
     const { data: profile } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', session.user.id)
+      .eq('id', authJson.user.id)
       .single();
 
     if (!profile) return reply.status(401).send({ error: 'Profilo non trovato' });
@@ -106,7 +123,7 @@ const authRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
     return {
-      token: session.session.access_token,
+      token: authJson.access_token,
       user: {
         id: profile.id,
         name: profile.name,
