@@ -70,7 +70,7 @@ export function NotificationPanel() {
     try {
       await api.notifications.activate(n.trigger_user_id, { role, notificationId: n.id });
       toast({ title: `${n.trigger_user_name} abilitato come ${role === 'admin' ? 'Admin' : 'Utente'}` });
-      setNotifications((prev) => prev.map((x) => (x._id === n.id ? { ...x, read: true } : x)));
+      setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
       setUnreadCount((c) => Math.max(0, c - 1));
     } catch (err: unknown) {
       toast({ variant: 'destructive', title: 'Errore', description: err instanceof Error ? err.message : 'Errore' });
