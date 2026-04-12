@@ -282,7 +282,7 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
 
       const wb = XLSX.utils.book_new();
 
-      // Foglio 1 — Riepilogo
+      // Foglio 1 — Riepilogo generale
       const userTotals: Record<string, number> = {};
       summary.forEach((r) => {
         userTotals[r.userName] = (userTotals[r.userName] ?? 0) + r.totalHours;
@@ -302,23 +302,57 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       wsSummary['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 14 }, { wch: 16 }];
       XLSX.utils.book_append_sheet(wb, wsSummary, 'Riepilogo');
 
-      // Foglio 2 — Dettaglio giornaliero
-      const detailRows: (string | number)[][] = [
-        [`Dettaglio Giornaliero — ${monthLabel}`],
-        [],
-        ['Dipendente', 'Data', 'Location', 'Ore', 'Note'],
-        ...(rows as EntryRow[]).map((e) => [
-          e.profiles?.name ?? '',
-          e.date,
-          e.locations?.name ?? '',
-          e.hours,
-          e.notes ?? '',
-        ]),
-      ];
+      // Un foglio per ogni utente con il dettaglio giornaliero
+      const byUser = new Map<string, { name: string; entries: EntryRow[] }>();
+      for (const e of rows as EntryRow[]) {
+        const uid = e.user_id;
+        if (!byUser.has(uid)) {
+          byUser.set(uid, { name: e.profiles?.name ?? uid, entries: [] });
+        }
+        byUser.get(uid)!.entries.push(e);
+      }
 
-      const wsDetail = XLSX.utils.aoa_to_sheet(detailRows);
-      wsDetail['!cols'] = [{ wch: 25 }, { wch: 12 }, { wch: 20 }, { wch: 8 }, { wch: 30 }];
-      XLSX.utils.book_append_sheet(wb, wsDetail, 'Dettaglio Giornaliero');
+      // Ordina utenti per nome
+      const sortedUsers = Array.from(byUser.values()).sort((a, b) =>
+        a.name.localeCompare(b.name)
+      );
+
+      for (const { name, entries } of sortedUsers) {
+        // Calcola totali per location per questo utente
+        const locTotals = new Map<string, number>();
+        for (const e of entries) {
+          const loc = e.locations?.name ?? '';
+          locTotals.set(loc, (locTotals.get(loc) ?? 0) + e.hours);
+        }
+
+        const userRows: (string | number)[][] = [
+          [`${name} — ${monthLabel}`],
+          [],
+          ['Data', 'Location', 'Inizio', 'Fine', 'Ore', 'Note'],
+          ...entries
+            .sort((a, b) => a.date.localeCompare(b.date) || (a.locations?.name ?? '').localeCompare(b.locations?.name ?? ''))
+            .map((e) => [
+              e.date,
+              e.locations?.name ?? '',
+              e.start_time ?? '',
+              e.end_time ?? '',
+              e.hours,
+              e.notes ?? '',
+            ]),
+          [],
+          ['TOTALE PER LOCATION', '', '', '', '', ''],
+          ...Array.from(locTotals.entries()).map(([loc, tot]) => ['', loc, '', '', tot, '']),
+          [],
+          ['TOTALE ORE', '', '', '', Array.from(locTotals.values()).reduce((a, b) => a + b, 0), ''],
+        ];
+
+        const ws = XLSX.utils.aoa_to_sheet(userRows);
+        ws['!cols'] = [{ wch: 12 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 30 }];
+
+        // Nome foglio: max 31 caratteri (limite Excel), caratteri speciali rimossi
+        const sheetName = name.replace(/[\\/*?[\]]/g, '').slice(0, 31);
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+      }
 
       const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
