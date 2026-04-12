@@ -14,20 +14,8 @@ const PORT = Number(process.env.PORT ?? 3001);
 const fastify = Fastify({ logger: true });
 
 async function bootstrap() {
-  const allowedOrigins = process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-    : [];
-
   await fastify.register(cors, {
-    origin: (origin, cb) => {
-      // Permetti richieste senza origin (curl, server-to-server, Render health checks)
-      if (!origin) return cb(null, true);
-      // In dev (nessuna variabile) permetti tutto
-      if (allowedOrigins.length === 0) return cb(null, true);
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      fastify.log.warn(`CORS bloccato: origin="${origin}" non in [${allowedOrigins.join(', ')}]`);
-      cb(new Error('Not allowed by CORS'), false);
-    },
+    origin: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
