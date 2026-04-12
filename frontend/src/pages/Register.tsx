@@ -4,9 +4,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/hooks/use-toast';
-import { UserPlus, Clock } from 'lucide-react';
+import { Clock } from 'lucide-react';
+import { SolkyLogo } from '@/components/SolkyLogo';
 
 export default function Register() {
   const { register } = useAuth();
@@ -26,11 +26,8 @@ export default function Register() {
     setLoading(true);
     try {
       const isPending = await register(name, email, password);
-      if (isPending) {
-        setPending(true);
-      } else {
-        navigate('/');
-      }
+      if (isPending) setPending(true);
+      else navigate('/');
     } catch (err: unknown) {
       toast({
         variant: 'destructive',
@@ -42,44 +39,62 @@ export default function Register() {
     }
   };
 
-  // Schermata di attesa approvazione
   if (pending) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-muted/40 px-4">
-        <Card className="w-full max-w-sm text-center">
-          <CardHeader>
-            <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
+      <div className="min-h-screen flex items-center justify-center bg-muted/30 px-4">
+        <div className="w-full max-w-sm text-center space-y-6">
+          <SolkyLogo size="lg" />
+          <div className="flex flex-col items-center gap-4 bg-white border rounded-xl p-8 shadow-sm">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
               <Clock className="h-7 w-7 text-amber-600" />
             </div>
-            <CardTitle className="text-xl">Registrazione inviata</CardTitle>
-            <CardDescription className="text-sm leading-relaxed">
-              La tua richiesta è stata ricevuta. Un amministratore verificherà il tuo account e ti darà accesso a breve.
-            </CardDescription>
-          </CardHeader>
-          <CardFooter className="justify-center">
-            <Link to="/login" className="text-sm text-primary font-medium hover:underline">
+            <div>
+              <h2 className="text-xl font-bold mb-2">Richiesta inviata</h2>
+              <p className="text-muted-foreground text-sm leading-relaxed">
+                La tua richiesta è stata ricevuta. Un amministratore verificherà il tuo account e ti darà accesso a breve.
+              </p>
+            </div>
+            <Link to="/login" className="text-sm text-[#C41E3A] font-medium hover:underline">
               Torna al login
             </Link>
-          </CardFooter>
-        </Card>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/40 px-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <UserPlus className="h-6 w-6 text-primary" />
-          </div>
-          <CardTitle className="text-2xl">Registrati</CardTitle>
-          <CardDescription>Crea il tuo account per iniziare</CardDescription>
-        </CardHeader>
+    <div className="min-h-screen flex">
+      {/* Pannello sinistro */}
+      <div className="hidden lg:flex lg:w-1/2 bg-[#C41E3A] flex-col justify-between p-12 text-white">
+        <SolkyLogo size="lg" variant="full" />
+        <div className="space-y-4">
+          <h1 className="text-4xl font-bold leading-tight">
+            Unisciti al<br />team Solky Care
+          </h1>
+          <p className="text-red-100 text-lg leading-relaxed">
+            Crea il tuo account per iniziare a registrare le ore lavorate. L'amministratore attiverà il tuo profilo a breve.
+          </p>
+        </div>
+        <p className="text-red-200 text-sm">
+          Solky Care Cooperativa Sociale · Sant'Antioco, Sardegna
+        </p>
+      </div>
 
-        <form onSubmit={handleSubmit}>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
+      {/* Pannello destro */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6 py-12 bg-white">
+        <div className="w-full max-w-sm">
+          <div className="flex justify-center mb-10 lg:hidden">
+            <SolkyLogo size="lg" />
+          </div>
+
+          <h2 className="text-2xl font-bold text-foreground mb-1">Crea account</h2>
+          <p className="text-muted-foreground text-sm mb-8">
+            Compila i dati per richiedere l'accesso
+          </p>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-1.5">
               <Label htmlFor="name">Nome completo</Label>
               <Input
                 id="name"
@@ -88,20 +103,22 @@ export default function Register() {
                 onChange={(e) => setName(e.target.value)}
                 required
                 autoFocus
+                className="h-11"
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="nome@esempio.it"
+                placeholder="nome@solkycare.it"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                className="h-11"
               />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
@@ -110,23 +127,27 @@ export default function Register() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                className="h-11"
               />
             </div>
-          </CardContent>
 
-          <CardFooter className="flex flex-col gap-3">
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button
+              type="submit"
+              className="w-full h-11 bg-[#C41E3A] hover:bg-[#a8182f] text-white font-semibold mt-2"
+              disabled={loading}
+            >
               {loading ? 'Registrazione…' : 'Crea account'}
             </Button>
-            <p className="text-sm text-muted-foreground text-center">
-              Hai già un account?{' '}
-              <Link to="/login" className="text-primary font-medium hover:underline">
-                Accedi
-              </Link>
-            </p>
-          </CardFooter>
-        </form>
-      </Card>
+          </form>
+
+          <p className="text-sm text-muted-foreground text-center mt-6">
+            Hai già un account?{' '}
+            <Link to="/login" className="text-[#C41E3A] font-medium hover:underline">
+              Accedi
+            </Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

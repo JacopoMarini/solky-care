@@ -20,6 +20,7 @@ import {
   ChevronLeft, ChevronRight, MapPin, UserCheck, Clock,
 } from 'lucide-react';
 import { NotificationPanel } from '@/components/NotificationPanel';
+import { SolkyLogo } from '@/components/SolkyLogo';
 
 const MONTHS_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno',
   'Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -222,12 +223,9 @@ export default function Admin() {
     <div className="min-h-screen bg-muted/30">
 
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b bg-background shadow-sm">
+      <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
         <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <div>
-            <h1 className="text-lg font-semibold">Solky Care — Admin</h1>
-            <p className="text-xs text-muted-foreground">{user?.name}</p>
-          </div>
+          <SolkyLogo size="sm" />
           <div className="flex items-center gap-2">
             <Button variant={tab === 'monthly' ? 'default' : 'outline'} size="sm" onClick={() => setTab('monthly')}>
               <BarChart3 className="mr-1 h-4 w-4" /> Mensile

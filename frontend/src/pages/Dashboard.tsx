@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { ChevronLeft, ChevronRight, Plus, LogOut, Clock, MapPin } from 'lucide-react';
+import { SolkyLogo } from '@/components/SolkyLogo';
 import { cn } from '@/lib/utils';
 
 // ─── Costanti ───────────────────────────────────────────────────────────────
@@ -242,15 +243,17 @@ export default function Dashboard() {
     <div className="min-h-screen bg-muted/30">
 
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b bg-background shadow-sm">
+      <header className="sticky top-0 z-10 border-b bg-white shadow-sm">
         <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
-          <div>
-            <h1 className="text-base font-semibold">Solky Care</h1>
-            <p className="text-xs text-muted-foreground">Ciao, {user?.name}</p>
+          <SolkyLogo size="sm" />
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground hidden sm:block">
+              Ciao, <span className="font-medium text-foreground">{user?.name}</span>
+            </span>
+            <Button variant="ghost" size="icon" onClick={logout} title="Esci" className="text-muted-foreground hover:text-foreground">
+              <LogOut className="h-4 w-4" />
+            </Button>
           </div>
-          <Button variant="ghost" size="icon" onClick={logout} title="Esci">
-            <LogOut className="h-4 w-4" />
-          </Button>
         </div>
       </header>
 
