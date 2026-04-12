@@ -1,9 +1,19 @@
 import { FastifyPluginAsync } from 'fastify';
-import { Types } from 'mongoose';
 import * as XLSX from 'xlsx';
-import { WorkEntry } from '../models/WorkEntry';
-import { Notification } from '../models/Notification';
-import { Location } from '../models/Location';
+import { supabase } from '../lib/supabase';
+
+type EntryRow = {
+  id: string;
+  user_id: string;
+  location_id: string;
+  date: string;
+  hours: number;
+  start_time: string | null;
+  end_time: string | null;
+  notes: string | null;
+  profiles?: { name: string; email: string } | null;
+  locations?: { name: string } | null;
+};
 
 const entriesRoutes: FastifyPluginAsync = async (fastify) => {
   // ─── UTENTE ───────────────────────────────────────────────
@@ -16,19 +26,21 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       const { date } = req.query;
       if (!date) return reply.status(400).send({ error: 'Data obbligatoria' });
 
-      const entries = await WorkEntry.find({ userId: req.user.id, date })
-        .populate('locationId', 'name')
-        .lean();
+      const { data } = await supabase
+        .from('work_entries')
+        .select('*, locations(name)')
+        .eq('user_id', req.user.id)
+        .eq('date', date);
 
-      return entries.map((e) => ({
-        id: e._id,
+      return (data as EntryRow[] ?? []).map((e) => ({
+        id: e.id,
         date: e.date,
         hours: e.hours,
-        startTime: e.startTime,
-        endTime: e.endTime,
+        start_time: e.start_time,
+        end_time: e.end_time,
         notes: e.notes,
-        locationId: (e.locationId as any)._id,
-        locationName: (e.locationId as any).name,
+        locationId: e.location_id,
+        locationName: e.locations?.name,
       }));
     }
   );
@@ -42,32 +54,39 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       if (!year || !month) return reply.status(400).send({ error: 'Anno e mese obbligatori' });
 
       const prefix = `${year}-${String(month).padStart(2, '0')}`;
-      const entries = await WorkEntry.find({
-        userId: req.user.id,
-        date: { $regex: `^${prefix}` },
-      })
-        .populate('locationId', 'name')
-        .sort({ date: 1 })
-        .lean();
 
-      return entries.map((e) => ({
-        id: e._id,
+      const { data } = await supabase
+        .from('work_entries')
+        .select('*, locations(name)')
+        .eq('user_id', req.user.id)
+        .like('date', `${prefix}%`)
+        .order('date');
+
+      return (data as EntryRow[] ?? []).map((e) => ({
+        id: e.id,
         date: e.date,
         hours: e.hours,
-        startTime: e.startTime,
-        endTime: e.endTime,
+        start_time: e.start_time,
+        end_time: e.end_time,
         notes: e.notes,
-        locationId: (e.locationId as any)._id,
-        locationName: (e.locationId as any).name,
+        locationId: e.location_id,
+        locationName: e.locations?.name,
       }));
     }
   );
 
   // POST /api/entries — crea o aggiorna (upsert)
   fastify.post<{
-    Body: { locationId: string; date: string; hours: number; startTime?: string; endTime?: string; notes?: string };
+    Body: {
+      locationId: string;
+      date: string;
+      hours: number;
+      start_time?: string;
+      end_time?: string;
+      notes?: string;
+    };
   }>('/', { preHandler: fastify.authenticate }, async (req, reply) => {
-    const { locationId, date, hours, startTime, endTime, notes } = req.body;
+    const { locationId, date, hours, start_time, end_time, notes } = req.body;
     if (!locationId || !date || hours == null)
       return reply.status(400).send({ error: 'locationId, date e hours obbligatori' });
 
@@ -75,38 +94,59 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'Ore non valide (0-24)' });
 
     if (hours === 0) {
-      await WorkEntry.deleteOne({
-        userId: req.user.id,
-        locationId: new Types.ObjectId(locationId),
-        date,
-      });
+      await supabase
+        .from('work_entries')
+        .delete()
+        .eq('user_id', req.user.id)
+        .eq('location_id', locationId)
+        .eq('date', date);
       return { deleted: true };
     }
 
-    const isNew = !(await WorkEntry.exists({
-      userId: req.user.id,
-      locationId: new Types.ObjectId(locationId),
-      date,
-    }));
+    // Controlla se è un nuovo inserimento (per la notifica)
+    const { count } = await supabase
+      .from('work_entries')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', req.user.id)
+      .eq('location_id', locationId)
+      .eq('date', date);
+    const isNew = (count ?? 0) === 0;
 
-    const entry = await WorkEntry.findOneAndUpdate(
-      { userId: req.user.id, locationId: new Types.ObjectId(locationId), date },
-      { hours, startTime: startTime ?? null, endTime: endTime ?? null, notes: notes ?? '' },
-      { upsert: true, new: true }
-    );
+    const { data, error } = await supabase
+      .from('work_entries')
+      .upsert(
+        {
+          user_id: req.user.id,
+          location_id: locationId,
+          date,
+          hours,
+          start_time: start_time ?? null,
+          end_time: end_time ?? null,
+          notes: notes ?? '',
+        },
+        { onConflict: 'user_id,location_id,date' }
+      )
+      .select()
+      .single();
 
-    // Notifica solo al primo inserimento (non sugli aggiornamenti)
+    if (error) return reply.status(500).send({ error: error.message });
+
+    // Notifica solo al primo inserimento
     if (isNew) {
-      const loc = await Location.findById(locationId).lean();
-      await Notification.create({
+      const { data: loc } = await supabase
+        .from('locations')
+        .select('name')
+        .eq('id', locationId)
+        .single();
+      await supabase.from('notifications').insert({
         type: 'hours_added',
-        triggerUserId: req.user.id,
-        triggerUserName: req.user.name,
+        trigger_user_id: req.user.id,
+        trigger_user_name: req.user.name,
         meta: { date, hours, locationName: loc?.name ?? locationId },
       });
     }
 
-    return { id: entry._id, upserted: true };
+    return { id: data.id, upserted: true };
   });
 
   // DELETE /api/entries/:id
@@ -114,13 +154,18 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
     '/:id',
     { preHandler: fastify.authenticate },
     async (req, reply) => {
-      const entry = await WorkEntry.findById(req.params.id);
+      const { data: entry } = await supabase
+        .from('work_entries')
+        .select('user_id')
+        .eq('id', req.params.id)
+        .single();
+
       if (!entry) return reply.status(404).send({ error: 'Entry non trovata' });
 
-      if (entry.userId.toString() !== req.user.id && req.user.role !== 'admin')
+      if (entry.user_id !== req.user.id && req.user.role !== 'admin')
         return reply.status(403).send({ error: 'Non autorizzato' });
 
-      await entry.deleteOne();
+      await supabase.from('work_entries').delete().eq('id', req.params.id);
       return { success: true };
     }
   );
@@ -137,43 +182,34 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
 
       const prefix = `${year}-${String(month).padStart(2, '0')}`;
 
-      const rows = await WorkEntry.aggregate([
-        { $match: { date: { $regex: `^${prefix}` } } },
-        {
-          $group: {
-            _id: { userId: '$userId', locationId: '$locationId' },
-            totalHours: { $sum: '$hours' },
-            daysWorked: { $addToSet: '$date' },
-          },
-        },
-        {
-          $lookup: { from: 'users', localField: '_id.userId', foreignField: '_id', as: 'user' },
-        },
-        {
-          $lookup: {
-            from: 'locations',
-            localField: '_id.locationId',
-            foreignField: '_id',
-            as: 'location',
-          },
-        },
-        { $unwind: '$user' },
-        { $unwind: '$location' },
-        {
-          $project: {
-            _id: 0,
-            userId: '$user._id',
-            userName: '$user.name',
-            userEmail: '$user.email',
-            locationName: '$location.name',
-            totalHours: 1,
-            daysWorked: { $size: '$daysWorked' },
-          },
-        },
-        { $sort: { userName: 1, locationName: 1 } },
-      ]);
+      const { data } = await supabase
+        .from('work_entries')
+        .select('*, profiles(name, email), locations(name)')
+        .like('date', `${prefix}%`);
 
-      return rows;
+      // Aggrega in memoria: per utente + location
+      const map = new Map<string, { userId: string; userName: string; userEmail: string; locationName: string; totalHours: number; days: Set<string> }>();
+
+      for (const e of data ?? []) {
+        const key = `${e.user_id}__${e.location_id}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            userId: e.user_id,
+            userName: (e.profiles as any)?.name ?? '',
+            userEmail: (e.profiles as any)?.email ?? '',
+            locationName: (e.locations as any)?.name ?? '',
+            totalHours: 0,
+            days: new Set(),
+          });
+        }
+        const row = map.get(key)!;
+        row.totalHours += e.hours;
+        row.days.add(e.date);
+      }
+
+      return Array.from(map.values())
+        .map((r) => ({ ...r, daysWorked: r.days.size, days: undefined }))
+        .sort((a, b) => a.userName.localeCompare(b.userName) || a.locationName.localeCompare(b.locationName));
     }
   );
 
@@ -186,17 +222,18 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       if (!year || !month) return reply.status(400).send({ error: 'Anno e mese obbligatori' });
 
       const prefix = `${year}-${String(month).padStart(2, '0')}`;
-      const entries = await WorkEntry.find({ date: { $regex: `^${prefix}` } })
-        .populate('userId', 'name email')
-        .populate('locationId', 'name')
-        .sort({ date: 1 })
-        .lean();
 
-      return entries.map((e) => ({
-        userName: (e.userId as any).name,
-        userEmail: (e.userId as any).email,
+      const { data } = await supabase
+        .from('work_entries')
+        .select('*, profiles(name, email), locations(name)')
+        .like('date', `${prefix}%`)
+        .order('date');
+
+      return (data as EntryRow[] ?? []).map((e) => ({
+        userName: e.profiles?.name ?? '',
+        userEmail: e.profiles?.email ?? '',
         date: e.date,
-        locationName: (e.locationId as any).name,
+        locationName: e.locations?.name ?? '',
         hours: e.hours,
         notes: e.notes ?? '',
       }));
@@ -214,45 +251,34 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       const prefix = `${year}-${String(month).padStart(2, '0')}`;
       const monthLabel = `${String(month).padStart(2, '0')}/${year}`;
 
-      // Dettaglio
-      const detail = await WorkEntry.find({ date: { $regex: `^${prefix}` } })
-        .populate('userId', 'name')
-        .populate('locationId', 'name')
-        .sort({ 'userId.name': 1, date: 1 })
-        .lean();
+      const { data } = await supabase
+        .from('work_entries')
+        .select('*, profiles(name, email), locations(name)')
+        .like('date', `${prefix}%`)
+        .order('date');
 
-      // Riepilogo aggregato
-      const summary = await WorkEntry.aggregate([
-        { $match: { date: { $regex: `^${prefix}` } } },
-        {
-          $group: {
-            _id: { userId: '$userId', locationId: '$locationId' },
-            totalHours: { $sum: '$hours' },
-            daysWorked: { $addToSet: '$date' },
-          },
-        },
-        { $lookup: { from: 'users', localField: '_id.userId', foreignField: '_id', as: 'user' } },
-        {
-          $lookup: {
-            from: 'locations',
-            localField: '_id.locationId',
-            foreignField: '_id',
-            as: 'location',
-          },
-        },
-        { $unwind: '$user' },
-        { $unwind: '$location' },
-        {
-          $project: {
-            _id: 0,
-            userName: '$user.name',
-            locationName: '$location.name',
-            totalHours: 1,
-            daysWorked: { $size: '$daysWorked' },
-          },
-        },
-        { $sort: { userName: 1, locationName: 1 } },
-      ]);
+      const rows = data ?? [];
+
+      // Aggrega per riepilogo
+      const summaryMap = new Map<string, { userName: string; locationName: string; totalHours: number; days: Set<string> }>();
+      for (const e of rows) {
+        const key = `${e.user_id}__${e.location_id}`;
+        if (!summaryMap.has(key)) {
+          summaryMap.set(key, {
+            userName: (e.profiles as any)?.name ?? '',
+            locationName: (e.locations as any)?.name ?? '',
+            totalHours: 0,
+            days: new Set(),
+          });
+        }
+        const row = summaryMap.get(key)!;
+        row.totalHours += e.hours;
+        row.days.add(e.date);
+      }
+
+      const summary = Array.from(summaryMap.values()).sort(
+        (a, b) => a.userName.localeCompare(b.userName) || a.locationName.localeCompare(b.locationName)
+      );
 
       const wb = XLSX.utils.book_new();
 
@@ -266,7 +292,7 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
         [`Riepilogo Ore — ${monthLabel}`],
         [],
         ['Dipendente', 'Location', 'Ore Totali', 'Giorni Lavorati'],
-        ...summary.map((r) => [r.userName, r.locationName, r.totalHours, r.daysWorked]),
+        ...summary.map((r) => [r.userName, r.locationName, r.totalHours, r.days.size]),
         [],
         ['TOTALI PER DIPENDENTE', '', '', ''],
         ...Object.entries(userTotals).map(([name, tot]) => [name, '', tot, '']),
@@ -281,10 +307,10 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
         [`Dettaglio Giornaliero — ${monthLabel}`],
         [],
         ['Dipendente', 'Data', 'Location', 'Ore', 'Note'],
-        ...detail.map((e) => [
-          (e.userId as any).name,
+        ...(rows as EntryRow[]).map((e) => [
+          e.profiles?.name ?? '',
           e.date,
-          (e.locationId as any).name,
+          e.locations?.name ?? '',
           e.hours,
           e.notes ?? '',
         ]),
@@ -297,14 +323,8 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
       reply
-        .header(
-          'Content-Disposition',
-          `attachment; filename="ore_${year}_${String(month).padStart(2, '0')}.xlsx"`
-        )
-        .header(
-          'Content-Type',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
+        .header('Content-Disposition', `attachment; filename="ore_${year}_${String(month).padStart(2, '0')}.xlsx"`)
+        .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
         .send(buf);
     }
   );

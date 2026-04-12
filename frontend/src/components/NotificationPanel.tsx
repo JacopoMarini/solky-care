@@ -60,17 +60,17 @@ export function NotificationPanel() {
 
   const markRead = async (id: string) => {
     await api.notifications.markRead(id);
-    setNotifications((n) => n.map((x) => (x._id === id ? { ...x, read: true } : x)));
+    setNotifications((n) => n.map((x) => (x.id === id ? { ...x, read: true } : x)));
     setUnreadCount((c) => Math.max(0, c - 1));
   };
 
   const activateUser = async (n: Notification) => {
-    const role = roleChoice[n._id] ?? 'user';
-    setActivatingId(n._id);
+    const role = roleChoice[n.id] ?? 'user';
+    setActivatingId(n.id);
     try {
-      await api.notifications.activate(n.triggerUserId, { role, notificationId: n._id });
-      toast({ title: `${n.triggerUserName} abilitato come ${role === 'admin' ? 'Admin' : 'Utente'}` });
-      setNotifications((prev) => prev.map((x) => (x._id === n._id ? { ...x, read: true } : x)));
+      await api.notifications.activate(n.trigger_user_id, { role, notificationId: n.id });
+      toast({ title: `${n.trigger_user_name} abilitato come ${role === 'admin' ? 'Admin' : 'Utente'}` });
+      setNotifications((prev) => prev.map((x) => (x._id === n.id ? { ...x, read: true } : x)));
       setUnreadCount((c) => Math.max(0, c - 1));
     } catch (err: unknown) {
       toast({ variant: 'destructive', title: 'Errore', description: err instanceof Error ? err.message : 'Errore' });
@@ -126,7 +126,7 @@ export function NotificationPanel() {
 
             {notifications.map((n) => (
               <div
-                key={n._id}
+                key={n.id}
                 className={cn(
                   'rounded-lg border p-3 space-y-2 transition-colors',
                   !n.read ? 'bg-primary/5 border-primary/20' : 'bg-muted/30'
@@ -147,9 +147,9 @@ export function NotificationPanel() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium leading-snug">
                       {n.type === 'new_registration' ? (
-                        <><strong>{n.triggerUserName}</strong> ha richiesto l'accesso</>
+                        <><strong>{n.trigger_user_name}</strong> ha richiesto l'accesso</>
                       ) : (
-                        <><strong>{n.triggerUserName}</strong> ha inserito le ore</>
+                        <><strong>{n.trigger_user_name}</strong> ha inserito le ore</>
                       )}
                     </p>
 
@@ -162,12 +162,12 @@ export function NotificationPanel() {
                       <p className="text-xs text-muted-foreground mt-0.5">{String(n.meta.email)}</p>
                     )}
 
-                    <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(n.createdAt)}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">{timeAgo(n.created_at)}</p>
                   </div>
 
                   {!n.read && n.type !== 'new_registration' && (
                     <button
-                      onClick={() => markRead(n._id)}
+                      onClick={() => markRead(n.id)}
                       className="flex-shrink-0 text-[10px] text-muted-foreground hover:text-foreground"
                       title="Segna come letta"
                     >
@@ -180,8 +180,8 @@ export function NotificationPanel() {
                 {n.type === 'new_registration' && !n.read && (
                   <div className="flex items-center gap-2 pt-1">
                     <Select
-                      value={roleChoice[n._id] ?? 'user'}
-                      onValueChange={(v) => setRoleChoice((r) => ({ ...r, [n._id]: v as 'admin' | 'user' }))}
+                      value={roleChoice[n.id] ?? 'user'}
+                      onValueChange={(v) => setRoleChoice((r) => ({ ...r, [n.id]: v as 'admin' | 'user' }))}
                     >
                       <SelectTrigger className="h-7 text-xs flex-1">
                         <SelectValue />
@@ -195,10 +195,10 @@ export function NotificationPanel() {
                       size="sm"
                       className="h-7 text-xs gap-1"
                       onClick={() => activateUser(n)}
-                      disabled={activatingId === n._id}
+                      disabled={activatingId === n.id}
                     >
                       <UserCheck className="h-3.5 w-3.5" />
-                      {activatingId === n._id ? 'Abilitando…' : 'Abilita'}
+                      {activatingId === n.id ? 'Abilitando…' : 'Abilita'}
                     </Button>
                   </div>
                 )}

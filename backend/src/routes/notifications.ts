@@ -1,31 +1,18 @@
 import { FastifyPluginAsync } from 'fastify';
-import { Notification } from '../models/Notification';
-import { User } from '../models/User';
+import { supabase } from '../lib/supabase';
 
 const notificationsRoutes: FastifyPluginAsync = async (fastify) => {
-  // GET /api/notifications — lista notifiche (solo admin)
-  fastify.get<{ Querystring: { unreadOnly?: string } }>(
-    '/',
+  // GET /api/notifications/unread-count — solo il contatore (per polling leggero)
+  // DEVE essere registrata prima di /:id/read per evitare conflitti di parametri
+  fastify.get(
+    '/unread-count',
     { preHandler: fastify.requireAdmin },
-    async (req) => {
-      const filter = req.query.unreadOnly === 'true' ? { read: false } : {};
-      const items = await Notification.find(filter)
-        .sort({ createdAt: -1 })
-        .limit(50)
-        .lean();
-      const unreadCount = await Notification.countDocuments({ read: false });
-      return { items, unreadCount };
-    }
-  );
-
-  // PATCH /api/notifications/:id/read — segna come letta
-  fastify.patch<{ Params: { id: string } }>(
-    '/:id/read',
-    { preHandler: fastify.requireAdmin },
-    async (req, reply) => {
-      const n = await Notification.findByIdAndUpdate(req.params.id, { read: true }, { new: true });
-      if (!n) return reply.status(404).send({ error: 'Notifica non trovata' });
-      return { success: true };
+    async () => {
+      const { count } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('read', false);
+      return { count: count ?? 0 };
     }
   );
 
@@ -34,38 +21,84 @@ const notificationsRoutes: FastifyPluginAsync = async (fastify) => {
     '/read-all',
     { preHandler: fastify.requireAdmin },
     async () => {
-      await Notification.updateMany({ read: false }, { read: true });
+      await supabase.from('notifications').update({ read: true }).eq('read', false);
       return { success: true };
     }
   );
 
-  // GET /api/notifications/unread-count — solo il contatore (per polling leggero)
-  fastify.get(
-    '/unread-count',
+  // GET /api/notifications — lista notifiche (solo admin)
+  fastify.get<{ Querystring: { unreadOnly?: string } }>(
+    '/',
     { preHandler: fastify.requireAdmin },
-    async () => {
-      const count = await Notification.countDocuments({ read: false });
-      return { count };
+    async (req) => {
+      let query = supabase
+        .from('notifications')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (req.query.unreadOnly === 'true') query = query.eq('read', false);
+
+      const { data } = await query;
+
+      const { count: unreadCount } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('read', false);
+
+      return { items: data ?? [], unreadCount: unreadCount ?? 0 };
+    }
+  );
+
+  // PATCH /api/notifications/:id/read — segna come letta
+  fastify.patch<{ Params: { id: string } }>(
+    '/:id/read',
+    { preHandler: fastify.requireAdmin },
+    async (req, reply) => {
+      const { data, error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', req.params.id)
+        .select()
+        .single();
+
+      if (error || !data) return reply.status(404).send({ error: 'Notifica non trovata' });
+      return { success: true };
     }
   );
 
   // POST /api/notifications/activate/:userId — abilita utente + segna notifica letta
-  fastify.post<{ Params: { userId: string }; Body: { role?: 'admin' | 'user'; notificationId?: string } }>(
+  fastify.post<{
+    Params: { userId: string };
+    Body: { role?: 'admin' | 'user'; notificationId?: string };
+  }>(
     '/activate/:userId',
     { preHandler: fastify.requireAdmin },
     async (req, reply) => {
-      const user = await User.findById(req.params.userId);
-      if (!user) return reply.status(404).send({ error: 'Utente non trovato' });
+      const { userId } = req.params;
+      const updates: Record<string, unknown> = { status: 'active' };
+      if (req.body.role) updates.role = req.body.role;
 
-      user.status = 'active';
-      if (req.body.role) user.role = req.body.role;
-      await user.save();
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (error || !data) return reply.status(404).send({ error: 'Utente non trovato' });
 
       if (req.body.notificationId) {
-        await Notification.findByIdAndUpdate(req.body.notificationId, { read: true });
+        await supabase
+          .from('notifications')
+          .update({ read: true })
+          .eq('id', req.body.notificationId);
       }
 
-      return { success: true, user: { id: user.id, name: user.name, role: user.role, status: user.status } };
+      return {
+        success: true,
+        user: { id: data.id, name: data.name, role: data.role, status: data.status },
+      };
     }
   );
 };

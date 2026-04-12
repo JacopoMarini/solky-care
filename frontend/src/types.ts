@@ -7,17 +7,17 @@ export interface User {
 }
 
 export interface Notification {
-  _id: string;
+  id: string;
   type: 'new_registration' | 'hours_added';
   read: boolean;
-  triggerUserId: string;
-  triggerUserName: string;
+  trigger_user_id: string;
+  trigger_user_name: string;
   meta?: Record<string, unknown>;
-  createdAt: string;
+  created_at: string;
 }
 
 export interface Location {
-  _id: string;
+  id: string;
   name: string;
 }
 
@@ -25,8 +25,8 @@ export interface WorkEntry {
   id: string;
   date: string;
   hours: number;
-  startTime?: string; // HH:MM
-  endTime?: string;   // HH:MM
+  start_time?: string; // HH:MM
+  end_time?: string;   // HH:MM
   notes?: string;
   locationId: string;
   locationName: string;

@@ -1,10 +1,11 @@
 import { FastifyPluginAsync } from 'fastify';
-import { Location } from '../models/Location';
+import { supabase } from '../lib/supabase';
 
 const locationsRoutes: FastifyPluginAsync = async (fastify) => {
   // GET /api/locations — tutti gli utenti autenticati
   fastify.get('/', { preHandler: fastify.authenticate }, async () => {
-    return Location.find().sort({ name: 1 }).lean();
+    const { data } = await supabase.from('locations').select('*').order('name');
+    return data ?? [];
   });
 
   // POST /api/locations — solo admin
@@ -15,11 +16,18 @@ const locationsRoutes: FastifyPluginAsync = async (fastify) => {
       const { name } = req.body;
       if (!name) return reply.status(400).send({ error: 'Nome obbligatorio' });
 
-      const exists = await Location.findOne({ name });
-      if (exists) return reply.status(409).send({ error: 'Location già esistente' });
+      const { data, error } = await supabase
+        .from('locations')
+        .insert({ name })
+        .select()
+        .single();
 
-      const loc = await Location.create({ name });
-      return { id: loc.id, name: loc.name };
+      if (error) {
+        if (error.code === '23505') return reply.status(409).send({ error: 'Location già esistente' });
+        return reply.status(500).send({ error: error.message });
+      }
+
+      return { id: data.id, name: data.name };
     }
   );
 
@@ -27,8 +35,9 @@ const locationsRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.delete<{ Params: { id: string } }>(
     '/:id',
     { preHandler: fastify.requireAdmin },
-    async (req) => {
-      await Location.findByIdAndDelete(req.params.id);
+    async (req, reply) => {
+      const { error } = await supabase.from('locations').delete().eq('id', req.params.id);
+      if (error) return reply.status(500).send({ error: error.message });
       return { success: true };
     }
   );

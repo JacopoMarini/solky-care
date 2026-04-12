@@ -477,7 +477,7 @@ export default function Admin() {
                     </TableRow>
                   )}
                   {locations.map((loc) => (
-                    <TableRow key={loc._id}>
+                    <TableRow key={loc.id}>
                       <TableCell className="flex items-center gap-2 font-medium">
                         <MapPin className="h-4 w-4 text-primary" />
                         {loc.name}
@@ -486,7 +486,7 @@ export default function Admin() {
                         <Button
                           variant="ghost" size="icon"
                           className="text-destructive hover:text-destructive"
-                          onClick={() => confirmDelete({ type: 'location', id: loc._id, label: loc.name })}
+                          onClick={() => confirmDelete({ type: 'location', id: loc.id, label: loc.name })}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>

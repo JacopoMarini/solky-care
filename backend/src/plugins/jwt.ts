@@ -1,52 +1,66 @@
 import fp from 'fastify-plugin';
-import fastifyJwt from '@fastify/jwt';
 import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
-
-export interface JwtPayload {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'user';
-}
-
-declare module '@fastify/jwt' {
-  interface FastifyJWT {
-    payload: JwtPayload;
-    user: JwtPayload;
-  }
-}
-
-const jwtPlugin: FastifyPluginAsync = async (fastify) => {
-  fastify.register(fastifyJwt, {
-    secret: process.env.JWT_SECRET ?? 'solky-secret-change-in-production',
-    sign: { expiresIn: '7d' },
-  });
-
-  fastify.decorate('authenticate', async (req: FastifyRequest, reply: FastifyReply) => {
-    try {
-      await req.jwtVerify();
-    } catch {
-      reply.status(401).send({ error: 'Token non valido o mancante' });
-    }
-  });
-
-  fastify.decorate('requireAdmin', async (req: FastifyRequest, reply: FastifyReply) => {
-    try {
-      await req.jwtVerify();
-    } catch {
-      return reply.status(401).send({ error: 'Token non valido o mancante' });
-    }
-    if (req.user.role !== 'admin') {
-      reply.status(403).send({ error: 'Accesso riservato agli amministratori' });
-    }
-  });
-};
+import { supabase, Profile } from '../lib/supabase';
 
 declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
     requireAdmin: (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
+  interface FastifyRequest {
+    user: Profile;
+  }
 }
 
-export default fp(jwtPlugin);
+const authPlugin: FastifyPluginAsync = async (fastify) => {
+  const resolveUser = async (
+    req: FastifyRequest,
+    reply: FastifyReply
+  ): Promise<Profile | null> => {
+    const header = req.headers.authorization;
+    if (!header?.startsWith('Bearer ')) {
+      reply.status(401).send({ error: 'Token mancante' });
+      return null;
+    }
+
+    const token = header.split(' ')[1];
+
+    // Verifica il token con Supabase Auth (unica fonte di verità)
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      reply.status(401).send({ error: 'Token non valido o scaduto' });
+      return null;
+    }
+
+    // Recupera profilo (ruolo, stato)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) {
+      reply.status(401).send({ error: 'Profilo non trovato' });
+      return null;
+    }
+
+    return profile as Profile;
+  };
+
+  fastify.decorate('authenticate', async (req: FastifyRequest, reply: FastifyReply) => {
+    const profile = await resolveUser(req, reply);
+    if (profile) req.user = profile;
+  });
+
+  fastify.decorate('requireAdmin', async (req: FastifyRequest, reply: FastifyReply) => {
+    const profile = await resolveUser(req, reply);
+    if (!profile) return;
+    if (profile.role !== 'admin') {
+      reply.status(403).send({ error: 'Accesso riservato agli amministratori' });
+      return;
+    }
+    req.user = profile;
+  });
+};
+
+export default fp(authPlugin);

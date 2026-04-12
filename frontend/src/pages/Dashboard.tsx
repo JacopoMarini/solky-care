@@ -116,7 +116,7 @@ export default function Dashboard() {
 
   const colorByLocId = useMemo(() => {
     const map: Record<string, (typeof LOC_COLORS)[0]> = {};
-    locations.forEach((loc, i) => { map[loc._id] = LOC_COLORS[i % LOC_COLORS.length]; });
+    locations.forEach((loc, i) => { map[loc.id] = LOC_COLORS[i % LOC_COLORS.length]; });
     return map;
   }, [locations]);
 
@@ -129,11 +129,11 @@ export default function Dashboard() {
 
     const initialStates: Record<string, LocEntry> = {};
     for (const loc of locations) {
-      const found = existing.find((e) => e.locationId === loc._id);
-      initialStates[loc._id] = {
+      const found = existing.find((e) => e.locationId === loc.id);
+      initialStates[loc.id] = {
         selected: !!found,
-        startTime: found?.startTime ?? '',
-        endTime: found?.endTime ?? '',
+        startTime: found?.start_time ?? '',
+        endTime: found?.end_time ?? '',
         hours: found?.hours ?? 0,
         notes: found?.notes ?? '',
         existingId: found?.id,
@@ -177,8 +177,8 @@ export default function Dashboard() {
             locationId: locId,
             date: modalDate,
             hours: state.hours,
-            startTime: state.startTime || undefined,
-            endTime: state.endTime || undefined,
+            start_time: state.startTime || undefined,
+            end_time: state.endTime || undefined,
             notes: state.notes || undefined,
           });
         } else if (!state.selected && state.existingId) {
@@ -375,7 +375,7 @@ export default function Dashboard() {
             {locations.map((loc, i) => {
               const color = LOC_COLORS[i % LOC_COLORS.length];
               return (
-                <div key={loc._id} className={cn('flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium', color.bg, color.text)}>
+                <div key={loc.id} className={cn('flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium', color.bg, color.text)}>
                   <div className={cn('h-2 w-2 rounded-full', color.dot)} />
                   {loc.name}
                 </div>
@@ -401,13 +401,13 @@ export default function Dashboard() {
               </p>
               <div className="flex flex-wrap gap-2">
                 {locations.map((loc, i) => {
-                  const state = locStates[loc._id];
+                  const state = locStates[loc.id];
                   const color = LOC_COLORS[i % LOC_COLORS.length];
                   return (
                     <button
-                      key={loc._id}
+                      key={loc.id}
                       type="button"
-                      onClick={() => toggleLocation(loc._id)}
+                      onClick={() => toggleLocation(loc.id)}
                       className={cn(
                         'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-all ring-2',
                         state?.selected
@@ -427,12 +427,12 @@ export default function Dashboard() {
             {selectedCount > 0 && (
               <div className="space-y-3">
                 {locations
-                  .filter((loc) => locStates[loc._id]?.selected)
+                  .filter((loc) => locStates[loc.id]?.selected)
                   .map((loc) => {
-                    const state = locStates[loc._id];
+                    const state = locStates[loc.id];
                     const color = LOC_COLORS[locations.indexOf(loc) % LOC_COLORS.length];
                     return (
-                      <div key={loc._id} className={cn('rounded-lg p-3 space-y-2', color.bg)}>
+                      <div key={loc.id} className={cn('rounded-lg p-3 space-y-2', color.bg)}>
                         <div className={cn('flex items-center gap-1.5 text-sm font-semibold', color.text)}>
                           <div className={cn('h-2 w-2 rounded-full', color.dot)} />
                           {loc.name}
@@ -449,7 +449,7 @@ export default function Dashboard() {
                             <Input
                               type="time"
                               value={state.startTime}
-                              onChange={(e) => updateTime(loc._id, 'startTime', e.target.value)}
+                              onChange={(e) => updateTime(loc.id, 'startTime', e.target.value)}
                               className="h-8 text-sm"
                             />
                           </div>
@@ -458,7 +458,7 @@ export default function Dashboard() {
                             <Input
                               type="time"
                               value={state.endTime}
-                              onChange={(e) => updateTime(loc._id, 'endTime', e.target.value)}
+                              onChange={(e) => updateTime(loc.id, 'endTime', e.target.value)}
                               className="h-8 text-sm"
                             />
                           </div>
@@ -472,7 +472,7 @@ export default function Dashboard() {
                           placeholder="Note (opzionale)"
                           value={state.notes}
                           onChange={(e) =>
-                            setLocStates((p) => ({ ...p, [loc._id]: { ...p[loc._id], notes: e.target.value } }))
+                            setLocStates((p) => ({ ...p, [loc.id]: { ...p[loc.id], notes: e.target.value } }))
                           }
                           className="h-8 text-sm"
                         />
