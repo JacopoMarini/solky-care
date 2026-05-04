@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
-import { ChevronLeft, ChevronRight, Plus, LogOut, Clock, MapPin } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, LogOut, Clock, MapPin, X } from 'lucide-react';
 import { SolkyLogo } from '@/components/SolkyLogo';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +38,15 @@ function calcHours(start: string, end: string): number {
   const [sh, sm] = start.split(':').map(Number);
   const [eh, em] = end.split(':').map(Number);
   const diff = (eh * 60 + em) - (sh * 60 + sm);
-  return diff > 0 ? Math.round(diff / 60 * 100) / 100 : 0;
+  return diff > 0 ? diff / 60 : 0;
+}
+
+function formatHours(h: number): string {
+  const totalMinutes = Math.round(h * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}.${String(minutes).padStart(2, '0')}h`;
 }
 
 function buildCalendarCells(year: number, month: number): (number | null)[] {
@@ -54,11 +62,12 @@ function buildCalendarCells(year: number, month: number): (number | null)[] {
 
 // ─── Tipi locali ─────────────────────────────────────────────────────────────
 
-interface LocEntry {
-  selected: boolean;
+interface Slot {
+  key: string;       // chiave React univoca
+  locId: string;
   startTime: string;
   endTime: string;
-  hours: number;        // calcolato automaticamente
+  hours: number;
   notes: string;
   existingId?: string;
 }
@@ -80,7 +89,8 @@ export default function Dashboard() {
 
   // Modale
   const [modalDate, setModalDate] = useState<string | null>(null);
-  const [locStates, setLocStates] = useState<Record<string, LocEntry>>({});
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   // ── Caricamento dati ──────────────────────────────────────────────────────
@@ -124,46 +134,44 @@ export default function Dashboard() {
   // ── Apertura modale ───────────────────────────────────────────────────────
 
   const openModal = useCallback(async (dateStr: string) => {
-    // Carica entry esistenti per quella data
     let existing: WorkEntry[] = [];
     try { existing = await api.entries.forDate(dateStr); } catch { /* nessuna entry */ }
 
-    const initialStates: Record<string, LocEntry> = {};
-    for (const loc of locations) {
-      const found = existing.find((e) => e.locationId === loc.id);
-      initialStates[loc.id] = {
-        selected: !!found,
-        startTime: found?.start_time ?? '',
-        endTime: found?.end_time ?? '',
-        hours: found?.hours ?? 0,
-        notes: found?.notes ?? '',
-        existingId: found?.id,
-      };
-    }
-    setLocStates(initialStates);
+    setSlots(existing.map((e) => ({
+      key:        e.id,
+      locId:      e.locationId,
+      startTime:  e.start_time ?? '',
+      endTime:    e.end_time ?? '',
+      hours:      e.hours,
+      notes:      e.notes ?? '',
+      existingId: e.id,
+    })));
+    setDeletedIds([]);
     setModalDate(dateStr);
   }, [locations]);
 
-  // ── Toggle selezione location nel modale ──────────────────────────────────
+  // ── Aggiunta / rimozione slot ─────────────────────────────────────────────
 
-  const toggleLocation = (locId: string) => {
-    setLocStates((prev) => ({
-      ...prev,
-      [locId]: { ...prev[locId], selected: !prev[locId].selected },
-    }));
+  const addSlot = (locId: string) => {
+    setSlots((prev) => [...prev, { key: crypto.randomUUID(), locId, startTime: '', endTime: '', hours: 0, notes: '' }]);
   };
 
-  // ── Aggiornamento orari ───────────────────────────────────────────────────
+  const removeSlot = (key: string) => {
+    const slot = slots.find((s) => s.key === key);
+    if (slot?.existingId) setDeletedIds((ids) => [...ids, slot.existingId!]);
+    setSlots((prev) => prev.filter((s) => s.key !== key));
+  };
 
-  const updateTime = (locId: string, field: 'startTime' | 'endTime', value: string) => {
-    setLocStates((prev) => {
-      const updated = { ...prev[locId], [field]: value };
-      updated.hours = calcHours(
-        field === 'startTime' ? value : updated.startTime,
-        field === 'endTime' ? value : updated.endTime,
-      );
-      return { ...prev, [locId]: updated };
-    });
+  // ── Aggiornamento campo slot ──────────────────────────────────────────────
+
+  const updateSlot = (key: string, field: 'startTime' | 'endTime' | 'notes', value: string) => {
+    setSlots((prev) => prev.map((s) => {
+      if (s.key !== key) return s;
+      const updated = { ...s, [field]: value };
+      if (field === 'startTime' || field === 'endTime')
+        updated.hours = calcHours(updated.startTime, updated.endTime);
+      return updated;
+    }));
   };
 
   // ── Salvataggio ───────────────────────────────────────────────────────────
@@ -172,21 +180,30 @@ export default function Dashboard() {
     if (!modalDate) return;
     setSaving(true);
     try {
-      const ops = Object.entries(locStates).map(async ([locId, state]) => {
-        if (state.selected && state.hours > 0) {
-          await api.entries.upsert({
-            locationId: locId,
-            date: modalDate,
-            hours: state.hours,
-            start_time: state.startTime || undefined,
-            end_time: state.endTime || undefined,
-            notes: state.notes || undefined,
-          });
-        } else if (!state.selected && state.existingId) {
-          // Era presente, ora deselezionato → elimina
-          await api.entries.delete(state.existingId);
+      const ops: Promise<unknown>[] = [];
+
+      // Elimina slot rimossi
+      for (const id of deletedIds) ops.push(api.entries.delete(id));
+
+      // Salva ogni slot valido
+      for (const slot of slots) {
+        if (slot.hours <= 0) {
+          if (slot.existingId) ops.push(api.entries.delete(slot.existingId));
+          continue;
         }
-      });
+        const data = {
+          locationId: slot.locId, date: modalDate, hours: slot.hours,
+          start_time: slot.startTime || undefined,
+          end_time:   slot.endTime   || undefined,
+          notes:      slot.notes     || undefined,
+        };
+        if (slot.existingId) {
+          ops.push(api.entries.update(slot.existingId, data));
+        } else {
+          ops.push(api.entries.create(data));
+        }
+      }
+
       await Promise.all(ops);
       await loadMonth();
       setModalDate(null);
@@ -228,10 +245,12 @@ export default function Dashboard() {
   }
 
   const totalMonth = monthEntries.reduce((s, e) => s + e.hours, 0);
-  const selectedCount = Object.values(locStates).filter((s) => s.selected).length;
-  const modalTotal = Object.values(locStates)
-    .filter((s) => s.selected)
-    .reduce((s, e) => s + e.hours, 0);
+  const modalTotal = slots.reduce((s, slot) => s + slot.hours, 0);
+  const slotCountByLoc = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const s of slots) map[s.locId] = (map[s.locId] ?? 0) + 1;
+    return map;
+  }, [slots]);
 
   const modalDateLabel = modalDate
     ? new Date(modalDate + 'T12:00:00').toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
@@ -270,7 +289,7 @@ export default function Dashboard() {
             </p>
             {totalMonth > 0 && (
               <p className="text-xs text-muted-foreground flex items-center justify-center gap-1">
-                <Clock className="h-3 w-3" /> {totalMonth}h totali
+                <Clock className="h-3 w-3" /> {formatHours(totalMonth)} totali
               </p>
             )}
           </div>
@@ -342,7 +361,7 @@ export default function Dashboard() {
                       <Plus className="h-3.5 w-3.5 text-muted-foreground/60" />
                     )}
                     {hasEntries && (
-                      <span className="text-[10px] font-semibold text-primary">{dayTotal}h</span>
+                      <span className="text-[10px] font-semibold text-primary">{formatHours(dayTotal)}</span>
                     )}
                   </div>
 
@@ -390,114 +409,121 @@ export default function Dashboard() {
 
       {/* ── MODALE ───────────────────────────────────────────────────────── */}
       <Dialog open={!!modalDate} onOpenChange={(open) => !open && setModalDate(null)}>
-        <DialogContent className="max-w-md w-full">
+        <DialogContent className="max-w-md w-full flex flex-col max-h-[90vh]">
           <DialogHeader>
             <DialogTitle className="capitalize">{modalDateLabel}</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4 py-1">
+          <div className="space-y-4 py-1 overflow-y-auto flex-1 min-h-0">
 
             {/* Tags location */}
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2 flex items-center gap-1">
-                <MapPin className="h-3 w-3" /> Seleziona dove hai lavorato
+                <MapPin className="h-3 w-3" /> Tocca per aggiungere una location
               </p>
               <div className="flex flex-wrap gap-2">
                 {locations.map((loc, i) => {
-                  const state = locStates[loc.id];
+                  const count = slotCountByLoc[loc.id] ?? 0;
                   const color = LOC_COLORS[i % LOC_COLORS.length];
                   return (
                     <button
                       key={loc.id}
                       type="button"
-                      onClick={() => toggleLocation(loc.id)}
+                      onClick={() => addSlot(loc.id)}
                       className={cn(
                         'flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium transition-all ring-2',
-                        state?.selected
+                        count > 0
                           ? [color.bg, color.text, color.ring]
                           : 'bg-muted text-muted-foreground ring-transparent hover:ring-border'
                       )}
                     >
-                      <div className={cn('h-2 w-2 rounded-full', state?.selected ? color.dot : 'bg-muted-foreground/40')} />
+                      <div className={cn('h-2 w-2 rounded-full', count > 0 ? color.dot : 'bg-muted-foreground/40')} />
                       {loc.name}
+                      {count > 1 && (
+                        <span className="rounded-full bg-white/40 px-1.5 text-xs font-bold">{count}</span>
+                      )}
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Orari per ogni location selezionata */}
-            {selectedCount > 0 && (
+            {/* Slot inseriti */}
+            {slots.length > 0 && (
               <div className="space-y-3">
-                {locations
-                  .filter((loc) => locStates[loc.id]?.selected)
-                  .map((loc) => {
-                    const state = locStates[loc.id];
-                    const color = LOC_COLORS[locations.indexOf(loc) % LOC_COLORS.length];
-                    return (
-                      <div key={loc.id} className={cn('rounded-lg p-3 space-y-2', color.bg)}>
-                        <div className={cn('flex items-center gap-1.5 text-sm font-semibold', color.text)}>
-                          <div className={cn('h-2 w-2 rounded-full', color.dot)} />
-                          {loc.name}
-                          {state.hours > 0 && (
-                            <Badge className="ml-auto text-xs py-0" variant="secondary">
-                              {state.hours}h
+                {slots.map((slot) => {
+                  const loc = locations.find((l) => l.id === slot.locId);
+                  const color = LOC_COLORS[locations.findIndex((l) => l.id === slot.locId) % LOC_COLORS.length];
+                  return (
+                    <div key={slot.key} className={cn('rounded-lg p-3 space-y-2', color.bg)}>
+                      <div className={cn('flex items-center gap-1.5 text-sm font-semibold', color.text)}>
+                        <div className={cn('h-2 w-2 rounded-full', color.dot)} />
+                        {loc?.name}
+                        <div className="ml-auto flex items-center gap-1">
+                          {slot.hours > 0 && (
+                            <Badge className="text-xs py-0" variant="secondary">
+                              {formatHours(slot.hours)}
                             </Badge>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => removeSlot(slot.key)}
+                            className="opacity-60 hover:opacity-100 transition-opacity"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
                         </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[10px] font-medium text-muted-foreground block mb-1">Inizio</label>
-                            <Input
-                              type="time"
-                              value={state.startTime}
-                              onChange={(e) => updateTime(loc.id, 'startTime', e.target.value)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-medium text-muted-foreground block mb-1">Fine</label>
-                            <Input
-                              type="time"
-                              value={state.endTime}
-                              onChange={(e) => updateTime(loc.id, 'endTime', e.target.value)}
-                              className="h-8 text-sm"
-                            />
-                          </div>
-                        </div>
-
-                        {state.startTime && state.endTime && state.hours === 0 && (
-                          <p className="text-[10px] text-rose-500">L'orario di fine deve essere dopo l'inizio</p>
-                        )}
-
-                        <Input
-                          placeholder="Note (opzionale)"
-                          value={state.notes}
-                          onChange={(e) =>
-                            setLocStates((p) => ({ ...p, [loc.id]: { ...p[loc.id], notes: e.target.value } }))
-                          }
-                          className="h-8 text-sm"
-                        />
                       </div>
-                    );
-                  })}
 
-                {/* Totale giornata */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] font-medium text-muted-foreground block mb-1">Inizio</label>
+                          <Input
+                            type="time"
+                            value={slot.startTime}
+                            onChange={(e) => updateSlot(slot.key, 'startTime', e.target.value)}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-medium text-muted-foreground block mb-1">Fine</label>
+                          <Input
+                            type="time"
+                            value={slot.endTime}
+                            onChange={(e) => updateSlot(slot.key, 'endTime', e.target.value)}
+                            className="h-8 text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {slot.startTime && slot.endTime && slot.hours === 0 && (
+                        <p className="text-[10px] text-rose-500">L'orario di fine deve essere dopo l'inizio</p>
+                      )}
+
+                      <Input
+                        placeholder="Note (opzionale)"
+                        value={slot.notes}
+                        onChange={(e) => updateSlot(slot.key, 'notes', e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  );
+                })}
+
                 {modalTotal > 0 && (
                   <div className="flex items-center justify-between rounded-lg border bg-primary/5 px-3 py-2">
                     <span className="text-sm text-muted-foreground flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5" /> Totale giornata
                     </span>
-                    <span className="text-sm font-bold text-primary">{modalTotal}h</span>
+                    <span className="text-sm font-bold text-primary">{formatHours(modalTotal)}</span>
                   </div>
                 )}
               </div>
             )}
 
-            {selectedCount === 0 && (
+            {slots.length === 0 && (
               <p className="text-sm text-muted-foreground text-center py-2">
-                Seleziona almeno una location per inserire le ore
+                Tocca una location per aggiungere le ore
               </p>
             )}
           </div>
@@ -508,7 +534,7 @@ export default function Dashboard() {
             </Button>
             <Button
               onClick={handleSave}
-              disabled={saving || selectedCount === 0 || modalTotal === 0}
+              disabled={saving || slots.length === 0 || modalTotal === 0}
             >
               {saving ? 'Salvataggio…' : 'Salva'}
             </Button>

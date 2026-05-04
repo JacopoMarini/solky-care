@@ -1,14 +1,14 @@
 import { FastifyPluginAsync } from 'fastify';
-import { supabase } from '../lib/supabase';
+import { Location } from '../lib/db';
 
 const locationsRoutes: FastifyPluginAsync = async (fastify) => {
-  // GET /api/locations — tutti gli utenti autenticati
+  // GET /api/locations
   fastify.get('/', { preHandler: fastify.authenticate }, async () => {
-    const { data } = await supabase.from('locations').select('*').order('name');
-    return data ?? [];
+    const locs = await Location.find().sort({ name: 1 }).lean();
+    return locs.map((l: any) => ({ id: String(l._id), name: l.name, created_at: l.created_at }));
   });
 
-  // POST /api/locations — solo admin
+  // POST /api/locations
   fastify.post<{ Body: { name: string } }>(
     '/',
     { preHandler: fastify.requireAdmin },
@@ -16,28 +16,23 @@ const locationsRoutes: FastifyPluginAsync = async (fastify) => {
       const { name } = req.body;
       if (!name) return reply.status(400).send({ error: 'Nome obbligatorio' });
 
-      const { data, error } = await supabase
-        .from('locations')
-        .insert({ name })
-        .select()
-        .single();
-
-      if (error) {
-        if (error.code === '23505') return reply.status(409).send({ error: 'Location già esistente' });
-        return reply.status(500).send({ error: error.message });
+      try {
+        const loc = await new Location({ name }).save();
+        return { id: String(loc._id), name: loc.name };
+      } catch (err: any) {
+        if (err.code === 11000) return reply.status(409).send({ error: 'Location già esistente' });
+        return reply.status(500).send({ error: err.message });
       }
-
-      return { id: data.id, name: data.name };
     }
   );
 
-  // DELETE /api/locations/:id — solo admin
+  // DELETE /api/locations/:id
   fastify.delete<{ Params: { id: string } }>(
     '/:id',
     { preHandler: fastify.requireAdmin },
     async (req, reply) => {
-      const { error } = await supabase.from('locations').delete().eq('id', req.params.id);
-      if (error) return reply.status(500).send({ error: error.message });
+      const loc = await Location.findByIdAndDelete(req.params.id);
+      if (!loc) return reply.status(404).send({ error: 'Location non trovata' });
       return { success: true };
     }
   );

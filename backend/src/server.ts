@@ -2,6 +2,7 @@ import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 
+import { connectDB } from './lib/db';
 import jwtPlugin from './plugins/jwt';
 import authRoutes from './routes/auth';
 import usersRoutes from './routes/users';
@@ -14,6 +15,7 @@ const PORT = Number(process.env.PORT ?? 3001);
 const fastify = Fastify({ logger: true });
 
 async function bootstrap() {
+  await connectDB();
   await fastify.register(cors, {
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

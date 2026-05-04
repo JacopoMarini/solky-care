@@ -1,4 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
+
+function formatHours(h: number): string {
+  const totalMinutes = Math.round(h * 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}.${String(minutes).padStart(2, '0')}h`;
+}
 import { useAuth } from '@/hooks/useAuth';
 import { api } from '@/api';
 import { User, Location, MonthlyRow, DetailRow } from '@/types';
@@ -286,7 +294,7 @@ export default function Admin() {
                   <CardHeader className="pb-2">
                     <CardTitle className="flex items-center justify-between text-base">
                       <span>{userName}</span>
-                      <Badge>{total}h totali</Badge>
+                      <Badge>{formatHours(total)} totali</Badge>
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
@@ -305,7 +313,7 @@ export default function Admin() {
                               <MapPin className="h-3 w-3 text-muted-foreground" />
                               {r.locationName}
                             </TableCell>
-                            <TableCell className="text-right font-medium">{r.totalHours}h</TableCell>
+                            <TableCell className="text-right font-medium">{formatHours(r.totalHours)}</TableCell>
                             <TableCell className="text-right">{r.daysWorked}</TableCell>
                           </TableRow>
                         ))}
@@ -547,7 +555,7 @@ export default function Admin() {
                   <TableCell className="font-medium">{r.userName}</TableCell>
                   <TableCell>{r.date.split('-').reverse().join('/')}</TableCell>
                   <TableCell>{r.locationName}</TableCell>
-                  <TableCell className="text-right">{r.hours}h</TableCell>
+                  <TableCell className="text-right">{formatHours(r.hours)}</TableCell>
                   <TableCell className="text-muted-foreground text-sm">{r.notes}</TableCell>
                 </TableRow>
               ))}

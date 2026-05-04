@@ -77,11 +77,10 @@ export const api = {
       request<import('./types').WorkEntry[]>(`/entries/my?date=${date}`),
     myMonth: (year: number, month: number) =>
       request<import('./types').WorkEntry[]>(`/entries/my/month?year=${year}&month=${month}`),
-    upsert: (data: { locationId: string; date: string; hours: number; start_time?: string; end_time?: string; notes?: string }) =>
-      request<{ id?: string; deleted?: boolean; upserted?: boolean }>('/entries', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
+    create: (data: { locationId: string; date: string; hours: number; start_time?: string; end_time?: string; notes?: string }) =>
+      request<{ id: string }>('/entries', { method: 'POST', body: JSON.stringify(data) }),
+    update: (id: string, data: { hours?: number; start_time?: string; end_time?: string; notes?: string }) =>
+      request<{ success: boolean }>(`/entries/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
     delete: (id: string) =>
       request<{ success: boolean }>(`/entries/${id}`, { method: 'DELETE' }),
 
