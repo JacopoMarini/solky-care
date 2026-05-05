@@ -236,8 +236,11 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
         .populate('location_id', 'name')
         .lean() as unknown as PopulatedEntry[];
 
-      // Aggrega per riepilogo
-      const summaryMap = new Map<string, { userName: string; locationName: string; totalHours: number; days: Set<string> }>();
+      // minuti → frazione-giorno Excel; usare interi per evitare errori float
+      const toFrac = (mins: number) => mins / 1440;
+
+      // Aggrega per riepilogo (usa minuti interi)
+      const summaryMap = new Map<string, { userName: string; locationName: string; totalMinutes: number; days: Set<string> }>();
       for (const e of rows) {
         const uid = String(e.user_id?._id ?? e.user_id);
         const lid = String(e.location_id?._id ?? e.location_id);
@@ -246,12 +249,12 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
           summaryMap.set(key, {
             userName:     (e.user_id as PopulatedUser)?.name ?? '',
             locationName: (e.location_id as PopulatedLocation)?.name ?? '',
-            totalHours:   0,
+            totalMinutes: 0,
             days:         new Set(),
           });
         }
         const row = summaryMap.get(key)!;
-        row.totalHours += e.hours;
+        row.totalMinutes += Math.round(e.hours * 60);
         row.days.add(e.date);
       }
 
@@ -334,21 +337,21 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
 
       let lastUser = '';
       summary.forEach((r, i) => {
-        const dataRow = wsSummary.addRow([r.userName, r.locationName, r.totalHours, r.days.size]);
+        const dataRow = wsSummary.addRow([r.userName, r.locationName, toFrac(r.totalMinutes), r.days.size]);
         applyDataRow(dataRow, i % 2 === 0);
         if (r.userName !== lastUser) {
           dataRow.getCell(1).font = { bold: true, color: { argb: `FF${C.text}` }, size: 13 };
           lastUser = r.userName;
         }
-        dataRow.getCell(3).numFmt = '0.00';
+        dataRow.getCell(3).numFmt = '[h]:mm';
         dataRow.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
         dataRow.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
       });
 
       wsSummary.addRow([]);
 
-      const userTotals: Record<string, number> = {};
-      summary.forEach((r) => { userTotals[r.userName] = (userTotals[r.userName] ?? 0) + r.totalHours; });
+      const userTotalMinutes: Record<string, number> = {};
+      summary.forEach((r) => { userTotalMinutes[r.userName] = (userTotalMinutes[r.userName] ?? 0) + r.totalMinutes; });
 
       const totSectionRow = wsSummary.addRow(['Totali per Dipendente', '', '', '']);
       wsSummary.mergeCells(`A${totSectionRow.number}:D${totSectionRow.number}`);
@@ -358,11 +361,11 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
       totSectionRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
       totSectionRow.getCell(1).border = border();
 
-      Object.entries(userTotals).forEach(([name, tot], i) => {
-        const tRow = wsSummary.addRow([name, '', tot, '']);
+      Object.entries(userTotalMinutes).forEach(([name, mins], i) => {
+        const tRow = wsSummary.addRow([name, '', toFrac(mins), '']);
         applyDataRow(tRow, i % 2 === 0);
         tRow.getCell(1).font = { bold: true, color: { argb: `FF${C.text}` }, size: 13 };
-        tRow.getCell(3).numFmt = '0.00';
+        tRow.getCell(3).numFmt = '[h]:mm';
         tRow.getCell(3).font = { bold: true, color: { argb: `FF${C.navyLight}` }, size: 13 };
         tRow.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
       });
@@ -419,11 +422,11 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
             (e.location_id as PopulatedLocation)?.name ?? '',
             e.start_time ?? '',
             e.end_time ?? '',
-            e.hours,
+            toFrac(Math.round(e.hours * 60)),
             e.notes ?? '',
           ]);
           applyDataRow(dr, i % 2 === 0);
-          dr.getCell(5).numFmt = '0.00';
+          dr.getCell(5).numFmt = '[h]:mm';
           dr.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
           dr.getCell(3).alignment = { horizontal: 'center', vertical: 'middle' };
           dr.getCell(4).alignment = { horizontal: 'center', vertical: 'middle' };
@@ -431,10 +434,11 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
 
         ws.addRow([]);
 
-        const locTotals = new Map<string, number>();
+        // Accumula in minuti interi per evitare errori float
+        const locMinutes = new Map<string, number>();
         for (const e of entries) {
           const loc = (e.location_id as PopulatedLocation)?.name ?? '';
-          locTotals.set(loc, (locTotals.get(loc) ?? 0) + e.hours);
+          locMinutes.set(loc, (locMinutes.get(loc) ?? 0) + Math.round(e.hours * 60));
         }
 
         const locSecRow = ws.addRow(['Totale per Location', '', '', '', '', '']);
@@ -445,19 +449,19 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
         locSecRow.getCell(1).alignment = { vertical: 'middle', horizontal: 'left' };
         locSecRow.getCell(1).border = border();
 
-        Array.from(locTotals.entries()).forEach(([loc, tot], i) => {
-          const lr = ws.addRow(['', loc, '', '', tot, '']);
+        Array.from(locMinutes.entries()).forEach(([loc, mins], i) => {
+          const lr = ws.addRow(['', loc, '', '', toFrac(mins), '']);
           applyDataRow(lr, i % 2 === 0);
           lr.getCell(2).font = { bold: true, color: { argb: `FF${C.text}` }, size: 13 };
-          lr.getCell(5).numFmt = '0.00';
+          lr.getCell(5).numFmt = '[h]:mm';
           lr.getCell(5).font = { bold: true, color: { argb: `FF${C.navyLight}` }, size: 13 };
           lr.getCell(5).alignment = { horizontal: 'center', vertical: 'middle' };
         });
 
         ws.addRow([]);
 
-        const grandTotal = Array.from(locTotals.values()).reduce((a, b) => a + b, 0);
-        const gtRow = ws.addRow(['Totale Ore', '', '', '', grandTotal, '']);
+        const grandTotalMins = Array.from(locMinutes.values()).reduce((a, b) => a + b, 0);
+        const gtRow = ws.addRow(['Totale Ore', '', '', '', toFrac(grandTotalMins), '']);
         ws.mergeCells(`A${gtRow.number}:D${gtRow.number}`);
         gtRow.height = 24;
         gtRow.eachCell({ includeEmpty: true }, (cell) => {
@@ -466,7 +470,7 @@ const entriesRoutes: FastifyPluginAsync = async (fastify) => {
           cell.border = border(C.totalBold);
           cell.alignment = { vertical: 'middle', horizontal: 'center' };
         });
-        gtRow.getCell(5).numFmt = '0.00';
+        gtRow.getCell(5).numFmt = '[h]:mm';
 
         ws.views = [{ state: 'frozen', ySplit: 3 }];
       }
